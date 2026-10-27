@@ -58,3 +58,32 @@
 - **Cosa ho scartato:** l'ipotesi di problemi di pull dell'immagine (smentita dall'evento "already present on machine") e interventi sulla readiness probe (il pod era sano).
 - **Valore prodotto:** la diagnosi è partita dalle evidenze (eventi, stato delle risorse, values effettivi del chart) invece di modificare configurazioni a tentativi.
 - **Lezioni operative:** usare `--atomic` solo quando l'installazione è già validata, perché in diagnosi cancella le prove; verificare sempre i manifest generati (`helm template`, `helm get manifest`) e non solo i values; ricontrollare i values a ogni cambio di versione maggiore di un chart.
+
+### #5 - Analisi iniziale dell'applicazione (Step 2)
+- **Strumento:** Claude (chat)
+- **Problema:** comprendere rapidamente servizi, linguaggi, dipendenze, protocolli, packaging e osservabilità di Online Boutique.
+- **Approccio:** l'AI ha fornito una mappa preliminare dei servizi basata sulla conoscenza generale del progetto, dichiarata come ipotesi; la mappa è stata poi verificata con comandi sul repository (Dockerfile, demo.proto, variabili *_ADDR, porte e probe nei manifest, router HTTP del frontend, struttura del chart Helm e dei componenti Kustomize).
+- **Confermato dalla verifica:** ruoli e linguaggi dei servizi, gRPC interno e HTTP verso il frontend, Redis come unico componente stateful.
+- **Emerso solo dalla verifica sul codice:**
+  - base upstream v0.10.7, runtime aggiornati (Go 1.27, .NET 10, Java 25, Node 24, Python 3.14), immagini base fissate per digest, tranne Redis (`redis:alpine`, tag mobile);
+  - shoppingassistantservice presente, in HTTP e non in gRPC; il frontend richiede comunque la variabile SHOPPING_ASSISTANT_SERVICE_ADDR (mustMapEnv) e va in crash se manca, anche con l'assistente disattivato;
+  - health check gRPC nativi del kubelet su tutti i servizi gRPC; il frontend usa /_healthz per liveness e readiness senza verificare i servizi a valle;
+  - porte Service diverse da quelle del container (emailservice 5000→8080, frontend 80→8080);
+  - Redis definito nel manifest di cartservice, con dati in emptyDir (persi alla ricreazione del pod);
+  - frontend esposto anche con un Service LoadBalancer, inutilizzabile su kind;
+  - log JSON nei servizi Go; nessuna metrica Prometheus esposta dai servizi; tracing non attivo nei manifest base;
+  - Helm chart di upstream senza Ingress e senza separazione degli ambienti; workflow CI di upstream orientati a GKE.
+- **Decisioni derivate:** chart copiato ed esteso in platform/charts; Ingress al posto del LoadBalancer; esclusione di shoppingassistant, Istio, Terraform e Cloud Build; loadgenerator solo in dev; metrica applicativa da costruire.
+- **Valore prodotto:** analisi completata in tempi ridotti partendo da un'ipotesi strutturata, con ogni affermazione del documento di architettura riconducibile a un file del repository; individuato un failure scenario realistico (variabile d'ambiente obbligatoria) dalla lettura del codice.
+- **Limiti:** la mappa preliminare non prevedeva i dettagli di versione, le particolarità del deploy (probe native, porte, posizione e persistenza di Redis) né la dipendenza obbligatoria del frontend dalla variabile dell'assistente: senza verifica, il documento avrebbe contenuto imprecisioni plausibili.
+
+### #6 - Documento di architettura (Step 3)
+- **Strumento:** Claude (chat)
+- **Problema:** produrre il documento di architettura con diagrammi coerenti con l'applicazione reale e con le decisioni prese.
+- **Approccio:** bozza generata dall'AI a partire dall'analisi dello step 2, con i punti incerti marcati "da verificare"; verifiche mirate sul codice prima della versione finale.
+- **Output corretto dopo la verifica:**
+  - l'ipotesi "metriche RED su tutti i servizi" era sovrastimata: il tracing è supportato da 7 servizi su 11 (cart, shipping e ad non sono strumentati);
+  - il Collector di upstream esporta solo verso Google Cloud e dipende dal metadata server di GCP: non riutilizzabile su kind, sostituito da una configurazione propria;
+  - l'invio dell'email di conferma non è bloccante per l'ordine (warning nel log): introdotta la distinzione tra dipendenze bloccanti e non bloccanti.
+- **Verifiche effettuate:** grep di ENABLE_TRACING nei sorgenti, lettura del template del Collector e dei values del chart, lettura della gestione degli errori in checkoutservice; anteprima dei diagrammi Mermaid in VS Code.
+- **Valore prodotto:** documento allineato al codice reale; individuato un secondo failure scenario (degrado controllato con emailservice non disponibile).

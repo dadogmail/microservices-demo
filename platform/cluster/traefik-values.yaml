@@ -1,0 +1,40 @@
+# traefik-values.yaml - Traefik come ingress controller del cluster kind
+# Validato con il chart traefik/traefik 42.1.3
+# Nota: nel chart 42.x il tipo di Service si imposta con service.spec.type
+# (service.type viene ignorato senza errori).
+service:
+  spec:
+    type: NodePort
+
+ports:
+  web:
+    nodePort: 30080
+  websecure:
+    nodePort: 30443
+
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+  name: traefik
+
+providers:
+  kubernetesIngress:
+    enabled: true
+  kubernetesCRD:
+    enabled: true
+
+# Sintassi dal chart v41+: logs.general -> log, logs.access -> accessLog
+log:
+  level: INFO
+  format: json
+
+accessLog:
+  enabled: true
+  format: json
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

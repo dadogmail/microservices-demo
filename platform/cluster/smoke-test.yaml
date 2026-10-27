@@ -1,0 +1,58 @@
+# smoke-test.yaml - verifica end-to-end del percorso di ingress
+# Uso: kubectl apply -f smoke-test.yaml && curl -H 'Host: smoke.localhost' http://127.0.0.1/
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: smoke-test
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whoami
+  namespace: smoke-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: whoami
+  template:
+    metadata:
+      labels:
+        app: whoami
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.10.1
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami
+  namespace: smoke-test
+spec:
+  selector:
+    app: whoami
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whoami
+  namespace: smoke-test
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: smoke.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: whoami
+                port:
+                  number: 80
